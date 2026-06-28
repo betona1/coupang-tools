@@ -1,4 +1,4 @@
--- 쿠팡 리뷰 저장 테이블 (192.168.219.200:3306 / joacham)
+-- 쿠팡 리뷰 저장 테이블 (<DB_HOST>:3306 / joacham)
 CREATE TABLE IF NOT EXISTS coupang_review (
   id            BIGINT AUTO_INCREMENT PRIMARY KEY,
   product_id    VARCHAR(30)  NOT NULL,            -- 노출상품ID

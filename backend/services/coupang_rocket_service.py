@@ -2,7 +2,7 @@
 
 쿠팡 WING Seller Open API 의 재고조회 엔드포인트를 사용해
 계정(키)에 등록된 옵션(vendorItemId)의 판매가/재고수량을 조회한다.
-원본: \\192.168.219.200\betona\python\쿠팡그로스재고\cupangpy6.py
+원본: \\<DB_HOST>\betona\python\쿠팡그로스재고\cupangpy6.py
 """
 import hashlib
 import hmac

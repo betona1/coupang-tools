@@ -1,9 +1,10 @@
 # 쿠팡 통합 운영 도구 (Coupang Tools)
 
 쿠팡(로켓그로스/마켓플레이스) 셀러 운영 자동화 모듈 모음 — **정산·재고관리·광고·가구매·리뷰**.
-[gmarket_cpc](../) Django REST + React 앱에서 쿠팡 관련 모듈만 모은 것 + 데스크톱 리뷰 수집기.
+Django REST + React 앱(gmarket_cpc)에서 쿠팡 관련 모듈만 모은 것 + 데스크톱 리뷰 수집기.
 
-> ⚠️ 내부 인프라(192.168.219.x) 의존. 비밀정보는 `.env`(미포함, `.env.example` 참조). **공개 배포 금지.**
+> 🔑 **모든 비밀정보(DB·API키·아이디·비번)는 `.env`로 입력** — 코드엔 없음. 설정법: **[docs/SETUP.md](docs/SETUP.md)**.
+> 시작: `.env.example` 복사 → `.env` 작성 → 모듈 사용.
 
 ---
 

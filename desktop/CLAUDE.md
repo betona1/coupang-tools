@@ -25,7 +25,7 @@
 - **productId**: 노출상품ID(상품 상세 URL `/vp/products/{이 번호}`)가 맞는지. WING '노출상품ID'와 동일.
 - **page 파라미터**가 실제로 먹는지(혹시 `pageNumber`/offset 이면 교정).
 
-## DB (192.168.219.200:3306 / joacham, 테이블 coupang_review)
+## DB (<DB_HOST>:3306 / joacham, 테이블 coupang_review)
 - 스키마: `DB_SCHEMA.sql` (서버에서 1회 실행해 테이블 생성).
 - 접속정보: `.env` (`.env.example` 복사). `pip install pymysql`.
 - UPSERT: `INSERT ... ON DUPLICATE KEY UPDATE` (uq: product_id+review_id+reviewer+headline).

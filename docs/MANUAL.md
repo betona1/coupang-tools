@@ -1,7 +1,7 @@
 # 쿠팡 통합 운영 도구 — 상세 메뉴얼
 
-> ⚠️ **비공개 전용.** 비밀정보(API키/아이디/비번)는 코드에 없음 — DB 암호화 필드(`*_enc`) +
-> `.env`(레포 미포함). 운영 시 각 환경의 `.env`/DB에 직접 설정.
+> 🔑 비밀정보(API키/아이디/비번)는 코드에 없음 — DB 암호화 필드(`*_enc`) + `.env`(미포함).
+> 설치·키 입력법은 **[SETUP.md](SETUP.md)** 참조.
 
 ---
 
@@ -25,13 +25,13 @@
 # 백엔드 (gmarket_cpc Django 앱 내에서 동작)
 pip install django djangorestframework undetected-chromedriver selenium beautifulsoup4 \
             requests pymysql openpyxl cryptography
-# .env 작성 (DB 2개: ads=192.168.219.200, joacham / 가구매방 GAGUMAE_*)
+# .env 작성 (DB 2개: ads=<DB_HOST>, joacham / 가구매방 GAGUMAE_*)
 
 # 데스크톱 리뷰 수집기
 pip install PySide6 PySide6-Addons beautifulsoup4 openpyxl pymysql
 ```
 
-DB: `ads`(로켓상품/광고/정산/계정), `joacham`(주문/리뷰/가구매). 둘 다 192.168.219.200:3306.
+DB: `ads`(로켓상품/광고/정산/계정), `joacham`(주문/리뷰/가구매). 둘 다 <DB_HOST>:3306.
 
 ---
 
