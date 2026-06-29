@@ -77,6 +77,8 @@ def parse_reviews(html, product_id):
         rid = a.get("data-review-id") or a.get("id") or ""
         name = pick("[class*='user__name']")
         date = pick("[class*='reviewed-date']", "[class*='reviewed']", "[class*='__date']")
+        # 날짜: selector 실패 시 article 텍스트에서 20XX.XX.XX / 20XX-XX-XX 패턴 추출(클래스명 무관)
+        _dm = re.search(r"20\d{2}[.\-/]\s?\d{1,2}[.\-/]\s?\d{1,2}", a.get_text(" ", strip=True))
         head = pick("[class*='headline']")
         body = pick("[class*='review__content']", ".sdp-review__article__list__review")
         star = pick("[class*='star-orange']", "[class*='star']", "[class*='rating']")
@@ -98,12 +100,13 @@ def parse_reviews(html, product_id):
         headline = head.get_text(strip=True) if head else ""
         content = body.get_text(" ", strip=True) if body else ""
         reviewer = name.get_text(strip=True) if name else ""
-        rdate = date.get_text(strip=True) if date else ""
+        rdate = (date.get_text(strip=True) if date else "") or (_dm.group(0).replace(" ", "") if _dm else "")
         rev_id = str(rid).replace("reviewArticle", "").strip("_- ")
         if not rev_id:
-            # 쿠팡 review_id 없으면 내용 해시로 고유 id 생성(재수집 시 중복방지)
+            # 쿠팡 review_id 없으면 해시로 고유 id 생성(재수집 시 중복방지).
+            # ★ 변동필드(rating/headline) 제외 — 파싱 결과 바뀌어도 같은 리뷰=같은 id 유지.
             import hashlib
-            sig = f"{product_id}|{reviewer}|{rdate}|{rating}|{headline}|{content}"
+            sig = f"{product_id}|{reviewer}|{rdate}|{content}"
             rev_id = "h" + hashlib.md5(sig.encode("utf-8")).hexdigest()[:18]
         out.append({
             "product_id": product_id,

@@ -31,7 +31,7 @@ def _env(key, default=""):
     return default
 
 
-BASE = _env("GAGUMAE_BASE", "")   # .env 에서 가구매방 URL 설정
+BASE = _env("GAGUMAE_BASE", "")
 USER = _env("GAGUMAE_USER", "")
 PW = _env("GAGUMAE_PW", "")
 API = BASE + "/dashboard/crossbuy/api.php?action="

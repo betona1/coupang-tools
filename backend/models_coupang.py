@@ -1,6 +1,5 @@
-# 쿠팡 관련 모델 (cpc/models.py 에서 추출 — 참조용)
-# 실제 동작은 gmarket_cpc Django 앱 내. DB: ads(<DB_HOST>) + joacham
-import_note = True
+# 쿠팡 관련 모델 (cpc/models.py 추출 — 참조용)
+# DB: ads(<DB_HOST>) + joacham
 
 from django.db import models
 

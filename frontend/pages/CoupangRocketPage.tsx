@@ -43,6 +43,13 @@ export default function CoupangRocketPage() {
   const [restockDetailFor, setRestockDetailFor] = useState<number | null>(null);
   const [filterAccount, setFilterAccount] = useState<number | 0>(0);
   const [dailyModal, setDailyModal] = useState<BestProduct | null>(null);
+  const [modalTab, setModalTab] = useState<'daily' | 'reviews'>('daily');
+  const openReviews = (p: CoupangRocketProduct) => {
+    setModalTab('reviews');
+    setDailyModal({ product_key: p.seller_product_id, product_name: p.product_name,
+      image_id: p.image_file ? p.id : null, option_count: 1,
+      today_qty: 0, week_qty: 0, month_qty: 0, today_amount: 0 });
+  };
   const [patternDays, setPatternDays] = useState<7 | 30>(30);
   // 매출그래프 + 시간대별 상품리스트 표시 날짜 (◀▶ / 좌우 화살표키로 이동)
   const [viewDate, setViewDate] = useState<string>(todayYmd());
@@ -434,14 +441,15 @@ export default function CoupangRocketPage() {
       {showIncreases && <IncreaseEventsModal onClose={() => setShowIncreases(false)} onChanged={refresh} />}
       {restockFor && <ExpectedRestockModal product={restockFor} onClose={() => setRestockFor(null)} onChanged={refresh} />}
       {barcodeFor && <BarcodeModal code={barcodeFor} onClose={() => setBarcodeFor('')} />}
-      {dailyModal && <ProductDailyModal product={dailyModal} accountId={filterAccount} onClose={() => setDailyModal(null)} />}
+      {dailyModal && <ProductDailyModal product={dailyModal} accountId={filterAccount} initialTab={modalTab} onClose={() => setDailyModal(null)} />}
       {restockDetailFor != null && <RestockDetailModal productId={restockDetailFor} onClose={() => setRestockDetailFor(null)} />}
       <RestockArrivedPopup />
+      {stats?.restock_needed && stats.restock_needed.length > 0 && <RestockNeededPopup items={stats.restock_needed} />}
 
       {stats && (
         <Dashboard
           stats={stats}
-          onBestClick={setDailyModal}
+          onBestClick={(b) => { setModalTab('daily'); setDailyModal(b); }}
           patternDays={patternDays}
           onPatternDaysChange={setPatternDays}
           viewDate={viewDate}
@@ -518,6 +526,10 @@ export default function CoupangRocketPage() {
                           ? <button onClick={() => setBarcodeFor(p.barcode)} title="클릭 → 바코드 생성(738×327, JPG 다운로드)"
                               className="font-mono text-[11px] text-blue-600 hover:underline hover:text-blue-800">🏷️ {p.barcode}</button>
                           : null}
+                        {p.seller_product_id && (
+                          <button onClick={() => openReviews(p)} title="이 상품 쿠팡 리뷰 보기"
+                            className="text-[11px] px-1.5 py-0.5 rounded bg-amber-100 text-amber-700 font-semibold hover:bg-amber-200">⭐ 리뷰</button>
+                        )}
                       </div>
                     </div>
                   )}
@@ -547,6 +559,9 @@ export default function CoupangRocketPage() {
                   {p.last_stock != null ? p.last_stock.toLocaleString() : '-'}
                   {p.last_stock != null && p.last_stock <= 0 && (
                     <span className="ml-1 px-1 py-[1px] bg-red-600 text-white text-[9px] rounded font-bold align-middle">품절</span>
+                  )}
+                  {salesByVid.get(p.vendor_item_id)?.restock_needed && (p.last_stock ?? 0) > 0 && (
+                    <span className="ml-1 px-1 py-[1px] bg-orange-500 text-white text-[9px] rounded font-bold align-middle animate-pulse" title="현재고 < 1달 판매량 · 선입고 미등록">입고필요</span>
                   )}
                 </td>
                 <td className="px-1.5 py-1.5 text-right font-bold text-[#e44232] bg-red-50">{salesByVid.get(p.vendor_item_id)?.today_qty ?? 0}</td>
@@ -929,12 +944,12 @@ function ProductTrend({ stats }: { stats: DashboardStats }) {
 
 // ── 베스트 상품 랭킹 리스트 (상품별 + 이미지) ──
 // ── 베스트 상품 30일 판매추이 + 주말/평일 비교 모달 ──
-function ProductDailyModal({ product, accountId, onClose }: {
-  product: BestProduct; accountId: number; onClose: () => void;
+function ProductDailyModal({ product, accountId, onClose, initialTab = 'daily' }: {
+  product: BestProduct; accountId: number; onClose: () => void; initialTab?: 'daily' | 'reviews';
 }) {
   const [data, setData] = useState<ProductDailyResp | null>(null);
   const [loading, setLoading] = useState(true);
-  const [tab, setTab] = useState<'daily' | 'reviews'>('daily');
+  const [tab, setTab] = useState<'daily' | 'reviews'>(initialTab);
   const [reviews, setReviews] = useState<ProductReviewsResp | null>(null);
   useEffect(() => {
     setLoading(true);
@@ -964,7 +979,7 @@ function ProductDailyModal({ product, accountId, onClose }: {
             className={`px-3 py-1 font-semibold ${tab === 'daily' ? 'bg-[#0074e9] text-white' : 'bg-white text-gray-500'}`}>📈 30일 판매추이</button>
           <button onClick={() => setTab('reviews')}
             className={`px-3 py-1 font-semibold ${tab === 'reviews' ? 'bg-[#0074e9] text-white' : 'bg-white text-gray-500'}`}>
-            ⭐ 리뷰{reviews?.count ? ` ${reviews.count}` : ''}
+            ⭐ 리뷰{reviews?.rated_count ? ` ${reviews.rated_count}` : (reviews?.count ? ` ${reviews.count}` : '')}
           </button>
         </div>
 
@@ -1076,7 +1091,7 @@ function ReviewSection({ reviews, productKey, onReloaded }: {
   );
 
   if (!reviews) return <div className="py-16 text-center text-gray-400 animate-pulse">리뷰 불러오는 중...</div>;
-  if (!reviews.count) {
+  if (!reviews.count && !reviews.rated_count) {
     return (
       <div className="py-12 text-center text-gray-400">
         수집된 리뷰가 없습니다.<br />
@@ -1097,7 +1112,7 @@ function ReviewSection({ reviews, productKey, onReloaded }: {
         <div className="text-center">
           <div className="text-4xl font-bold text-amber-500 tabular-nums">{reviews.avg}</div>
           <Stars n={reviews.avg} />
-          <div className="text-[11px] text-gray-500 mt-0.5">{reviews.count}개 리뷰</div>
+          <div className="text-[11px] text-gray-500 mt-0.5">{reviews.rated_count ?? reviews.count}개 별점</div>
         </div>
         <div className="flex-1 min-w-[200px] space-y-1">
           {[5, 4, 3, 2, 1].map(star => {
@@ -1115,8 +1130,10 @@ function ReviewSection({ reviews, productKey, onReloaded }: {
         </div>
       </div>
 
-      {/* 리뷰 목록 */}
-      <div className="space-y-2 max-h-[48vh] overflow-auto pr-1">
+      {/* 리뷰 목록 (내용 있는 것만, 최근순) */}
+      <div className="text-xs font-semibold text-gray-600 mb-1">📝 내용 리뷰 {reviews.count}건 <span className="text-gray-400 font-normal">(최근순 · 별점만인 건 제외)</span></div>
+      <div className="space-y-2 max-h-[44vh] overflow-auto pr-1">
+        {reviews.reviews.length === 0 && <div className="text-gray-400 text-sm py-6 text-center">내용 있는 리뷰가 없습니다 (별점만 있음)</div>}
         {reviews.reviews.map((r, i) => (
           <div key={i} className="border rounded-lg p-2.5">
             <div className="flex items-center gap-2 mb-0.5 flex-wrap">
@@ -1521,6 +1538,38 @@ function IntervalSetting() {
 }
 
 // 입고 완료(매칭) 팝업 — 오늘 자동입고된 건을 이미지+수량+시간으로 표시. "확인" 시 당일 다시 안 봄.
+// ── 입고필요 팝업 (현재고 < 1달판매 AND 선입고 미등록) ──
+function RestockNeededPopup({ items }: { items: NonNullable<DashboardStats['restock_needed']> }) {
+  const [closed, setClosed] = useState(false);
+  if (closed || !items.length) return null;
+  return (
+    <div className="fixed bottom-4 right-4 z-40 w-[360px] bg-white border-2 border-orange-400 rounded-xl shadow-2xl overflow-hidden">
+      <div className="flex items-center gap-2 px-3 py-2 bg-orange-500 text-white">
+        <span className="font-bold">📦 입고 필요 {items.length}건</span>
+        <span className="text-[11px] opacity-90">현재고 &lt; 1달 판매량</span>
+        <button onClick={() => setClosed(true)} className="ml-auto text-white/80 hover:text-white">✕</button>
+      </div>
+      <div className="max-h-[300px] overflow-auto divide-y">
+        {items.map((o, i) => (
+          <div key={i} className="px-3 py-2 text-sm flex items-center gap-2">
+            <span className="flex-1 truncate">
+              <span className="font-medium">{o.product_name}</span>
+              <span className="text-gray-400 text-[11px]"> · {o.option_name}</span>
+            </span>
+            <span className="text-right whitespace-nowrap">
+              <span className="text-red-600 font-bold">{o.last_stock ?? 0}</span>
+              <span className="text-gray-400 text-[11px]"> / 월{o.month_qty}</span>
+            </span>
+          </div>
+        ))}
+      </div>
+      <div className="px-3 py-1.5 text-[11px] text-gray-500 bg-orange-50">
+        선입고(예정) 등록하면 목록에서 빠집니다.
+      </div>
+    </div>
+  );
+}
+
 function RestockArrivedPopup() {
   const [items, setItems] = useState<ExpectedRestock[]>([]);
   const [idx, setIdx] = useState(0);

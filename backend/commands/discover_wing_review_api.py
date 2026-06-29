@@ -36,31 +36,31 @@ class Command(BaseCommand):
             drv.execute_cdp_cmd('Network.enable', {})
             drv.get('https://wing.coupang.com/'); time.sleep(4)
             self.stdout.write(f'WING 진입: {drv.current_url[:80]}')
+            # Resource Timing API 로 페이지가 부른 모든 URL 수집 (perf 로그 불필요)
+            JS = ("return performance.getEntriesByType('resource').map(e=>e.name)"
+                  ".concat(performance.getEntriesByType('navigation').map(e=>e.name));")
+            apis = set()
             for u in REVIEW_ROUTES:
                 try:
-                    drv.get(u); time.sleep(5)
-                    self.stdout.write(f'route {u[-45:]} → {drv.current_url[-55:]}')
+                    drv.get(u); time.sleep(8)
+                    title = drv.title[:25]
+                    res = drv.execute_script(JS) or []
+                    self.stdout.write(f'route {u[-45:]} → ({title}) 리소스 {len(res)}개')
+                    for url in res:
+                        low = url.lower()
+                        # 데이터 API 후보: /api·graphql·search·list·page 등 (정적 제외, 현재 route URL 자신 제외)
+                        if url.rstrip('/') == u.rstrip('/'):
+                            continue
+                        if any(k in low for k in ['/api', 'graphql', 'review', 'rating', 'inquiry', '/v1/', '/v2/', 'search', 'list', 'page']) \
+                                and not any(x in low for x in ['.js', '.css', '.png', '.svg', '.woff', '.ico', '.gif', '.json.map', 'sentry', 'analytics', 'gtm', 'static']):
+                            apis.add(url[:200])
                 except Exception as e:
                     self.stdout.write(f'  route err {str(e)[:60]}')
-            # 네트워크 로그에서 API 추출
-            apis = {}
-            for e in drv.get_log('performance'):
-                try:
-                    m = json.loads(e['message'])['message']
-                except Exception:
-                    continue
-                if m.get('method') == 'Network.requestWillBeSent':
-                    req = m['params']['request']
-                    url = req['url']
-                    low = url.lower()
-                    if 'coupang' in low and any(k in low for k in ['review', 'rating', 'comment']) \
-                            and not any(x in low for x in ['.js', '.css', '.png', '.svg', '.woff', '.ico']):
-                        apis[url[:200]] = req.get('method', 'GET')
             self.stdout.write('=== 리뷰 API 후보 ===')
-            for url, method in sorted(apis.items()):
-                self.stdout.write(f'  [{method}] {url}')
+            for url in sorted(apis):
+                self.stdout.write(f'  {url}')
             if not apis:
-                self.stdout.write('  (없음 — route 미진입이거나 메뉴 클릭 필요. page title: ' + drv.title[:40] + ')')
+                self.stdout.write('  (없음 — route가 실제 리뷰목록이 아닐 수 있음. 마지막 page title: ' + drv.title[:40] + ')')
         finally:
             try: drv.quit()
             except Exception: pass

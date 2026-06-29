@@ -28,10 +28,35 @@ def _add_crawlers_path():
         sys.path.insert(0, gmarket)
 
 
+def _clean_profile(profile_dir):
+    """프로필 폭주/시작실패 방지: 비대한 Preferences(손상 시 GB급)·캐시·스테일 Singleton 락 정리.
+    로그인(Cookies/Login Data)은 보존. exansys 프로필이 Preferences 2.3GB로 부풀어 uc 시작 실패한 사례 대응."""
+    import glob as _g
+    try:
+        # 스테일 Singleton 락 (죽은 chrome 잔존 시 새 세션 차단)
+        for lk in _g.glob(os.path.join(profile_dir, 'Singleton*')):
+            try: os.remove(lk)
+            except OSError: pass
+        # 손상/비대 Preferences (정상 수KB, 5MB 넘으면 손상 → 삭제 후 Chrome 재생성)
+        for pref in (os.path.join(profile_dir, 'Default', 'Preferences'),
+                     os.path.join(profile_dir, 'Default', 'Secure Preferences')):
+            try:
+                if os.path.exists(pref) and os.path.getsize(pref) > 5 * 1024 * 1024:
+                    os.remove(pref)
+            except OSError: pass
+        # 캐시(로그인 무관, 용량 차지)
+        for c in ('Default/Cache', 'Default/Code Cache', 'Default/GPUCache',
+                  'GrShaderCache', 'ShaderCache', 'Default/Service Worker/CacheStorage'):
+            shutil.rmtree(os.path.join(profile_dir, *c.split('/')), ignore_errors=True)
+    except Exception:
+        pass
+
+
 def _make_uc_driver(profile_dir):
     _add_crawlers_path()
     import undetected_chromedriver as uc
     from crawlers.browser import _ensure_display, _get_chrome_version, _find_chromedriver, CHROME_BIN
+    _clean_profile(profile_dir)   # 폭주/락 자동정리 (시작실패 방지)
     _ensure_display()
     ver = _get_chrome_version()
     # 호출마다 고유 드라이버 복사본 (동시 실행/잔존 프로세스 'Text file busy' 방지)

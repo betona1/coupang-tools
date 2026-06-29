@@ -987,25 +987,30 @@ def get_ad_efficiency(date_from, date_to, cupang_id=None):
 
 
 def get_product_reviews(product_key, limit=200):
-    """노출상품ID의 쿠팡 리뷰 (데탑 GUI가 joacham.coupang_review 에 적재한 것).
-    평균별점 + 별점분포 + 리뷰목록."""
-    rows = []
+    """노출상품ID의 쿠팡 리뷰. **내용 있는 리뷰만**(별점만 있는 건 제외) + 최근순.
+    평균별점/분포는 별점 있는 전체 기준(요약), 목록은 내용 있는 것만."""
     dist = {5: 0, 4: 0, 3: 0, 2: 0, 1: 0}
-    total = 0
+    rated_total = 0
     rsum = 0.0
+    rows = []
     try:
         with connections['joacham'].cursor() as c:
+            # 별점 요약: 별점 있는 전체
+            c.execute("SELECT rating FROM coupang_review WHERE product_id=%s AND rating IS NOT NULL",
+                      [str(product_key)])
+            for (rating,) in c.fetchall():
+                rated_total += 1
+                rsum += float(rating)
+                b = int(round(float(rating)))
+                if b in dist:
+                    dist[b] += 1
+            # 목록: 내용 있는 리뷰만, 최근순
             c.execute(
                 "SELECT rating, headline, content, reviewer, review_date, helpful_count "
-                "FROM coupang_review WHERE product_id=%s ORDER BY review_date DESC, id DESC LIMIT %s",
+                "FROM coupang_review WHERE product_id=%s AND content<>'' AND content IS NOT NULL "
+                "ORDER BY review_date DESC, id DESC LIMIT %s",
                 [str(product_key), limit])
             for rating, headline, content, reviewer, rdate, helpful in c.fetchall():
-                total += 1
-                if rating is not None:
-                    rsum += float(rating)
-                    b = int(round(float(rating)))
-                    if b in dist:
-                        dist[b] += 1
                 rows.append({
                     'rating': float(rating) if rating is not None else None,
                     'headline': headline or '', 'content': content or '',
@@ -1016,10 +1021,42 @@ def get_product_reviews(product_key, limit=200):
         return {'product_key': product_key, 'count': 0, 'avg': 0, 'dist': dist,
                 'reviews': [], 'error': str(e)}
     return {
-        'product_key': product_key, 'count': total,
-        'avg': round(rsum / total, 2) if total else 0,
+        'product_key': product_key,
+        'count': len(rows),                 # 내용 있는 리뷰 수
+        'rated_count': rated_total,          # 별점 매긴 전체 수(요약 기준)
+        'avg': round(rsum / rated_total, 2) if rated_total else 0,
         'dist': dist, 'reviews': rows,
     }
+
+
+def get_review_report():
+    """오늘 새로 들어온 리뷰(증가분) 상품별 리포트. collected_at=오늘 기준.
+    일일 리뷰 크롤 후 팝업으로 '리뷰 N건 증가' 보고용."""
+    rows = []
+    try:
+        with connections['joacham'].cursor() as c:
+            c.execute(
+                "SELECT product_id, COUNT(*) total, "
+                "SUM(DATE(collected_at)=CURDATE()) new_today "
+                "FROM coupang_review GROUP BY product_id HAVING new_today > 0 "
+                "ORDER BY new_today DESC")
+            data = c.fetchall()
+        # 상품명 매핑(ads DB)
+        pids = [str(r[0]) for r in data]
+        names = {}
+        if pids:
+            ph = ','.join(['%s'] * len(pids))
+            with connections['default'].cursor() as c2:
+                c2.execute(f"SELECT seller_product_id, MIN(product_name) FROM cupang_rocket_product "
+                           f"WHERE seller_product_id IN ({ph}) GROUP BY seller_product_id", pids)
+                names = {str(a): b for a, b in c2.fetchall()}
+        for pid, total, new_today in data:
+            rows.append({'product_id': str(pid), 'product_name': names.get(str(pid), str(pid)),
+                         'total': int(total), 'new_today': int(new_today or 0)})
+    except Exception:
+        pass
+    return {'date': str(__import__('datetime').date.today()),
+            'total_new': sum(r['new_today'] for r in rows), 'products': rows}
 
 
 def get_reviews_summary(product_keys):
@@ -1786,31 +1823,33 @@ def list_expected_restocks(vid=None):
 
 def get_restock_summary(vid=None):
     """옵션별 입고예정수량(pending) + 총입고수량.
-    총입고 = 수동입고(CoupangRestock) + 자동매칭된 입고예정(matched_qty) 누적."""
+    ★ 총입고 = 현재고 + 누적판매 (재고 보존법칙). 선입고 미등록으로 들어온 입고도 자동 반영
+       (과거엔 CoupangRestock+matched만 합산 → 선입고 안 걸고 입고하면 누락되는 버그.
+        예: 퍼플 현재고64인데 총입고10, 팔뚝 블랙1 현재고543인데 총입고396)."""
     from django.db.models import Sum
-    from .models import CoupangExpectedRestock, CoupangRestock
-    total_map = {}
-    # 수동 입고(처음 입고시킨 수량)
-    man = CoupangRestock.objects.all()
+    from .models import CoupangExpectedRestock, CoupangRocketProduct, CoupangDailySales
+    # 현재고 (API 최신값)
+    prods = CoupangRocketProduct.objects.all()
     if vid:
-        man = man.filter(vendor_item_id=vid)
-    for r in man.values('vendor_item_id').annotate(t=Sum('quantity')):
-        total_map[r['vendor_item_id']] = (total_map.get(r['vendor_item_id'], 0)) + (r['t'] or 0)
-    # 자동 매칭된 입고예정
-    mt = CoupangExpectedRestock.objects.filter(status='matched')
+        prods = prods.filter(vendor_item_id=vid)
+    stock_map = {v: (s or 0) for v, s in prods.values_list('vendor_item_id', 'last_stock')}
+    # 누적판매 (일별판매 합)
+    ds = CoupangDailySales.objects.all()
     if vid:
-        mt = mt.filter(vendor_item_id=vid)
-    for r in mt.values('vendor_item_id').annotate(t=Sum('matched_qty')):
-        total_map[r['vendor_item_id']] = (total_map.get(r['vendor_item_id'], 0)) + (r['t'] or 0)
-    # 입고예정수량 = pending 합
+        ds = ds.filter(vendor_item_id=vid)
+    sold_map = {}
+    for r in ds.values('vendor_item_id').annotate(s=Sum('sold_quantity')):
+        sold_map[r['vendor_item_id']] = r['s'] or 0
+    # 입고예정수량 = pending 합 (선입고)
     exp = CoupangExpectedRestock.objects.filter(status='pending')
     if vid:
         exp = exp.filter(vendor_item_id=vid)
     pend_map = {}
     for r in exp.values('vendor_item_id').annotate(t=Sum('expected_quantity')):
         pend_map[r['vendor_item_id']] = r['t'] or 0
-    keys = set(total_map) | set(pend_map)
-    return {k: {'pending_qty': pend_map.get(k, 0), 'total_restock': total_map.get(k, 0)} for k in keys}
+    keys = set(stock_map) | set(sold_map) | set(pend_map)
+    return {k: {'pending_qty': pend_map.get(k, 0),
+                'total_restock': stock_map.get(k, 0) + sold_map.get(k, 0)} for k in keys}
 
 
 # ── 입고(재입고) ──
@@ -2043,8 +2082,10 @@ def get_dashboard_stats(account_id: int = None, pattern_days: int = 30, date_str
             'today_amount': t_qty * price,
             'week_qty': sold_week[vid],
             'month_qty': sold_month[vid],
-            'pending_restock': rs.get('pending_qty', 0),    # 입고 예정수량
-            'total_restock': rs.get('total_restock', 0),    # 총입고수량(누적)
+            'pending_restock': rs.get('pending_qty', 0),    # 입고 예정수량(선입고)
+            'total_restock': rs.get('total_restock', 0),    # 총입고수량(=현재고+누적판매)
+            # 입고필요: 현재고 < 1달판매량 AND 선입고 미등록 → 곧 품절(입고 필요)
+            'restock_needed': bool(sold_month[vid] > (p.last_stock or 0) and rs.get('pending_qty', 0) == 0),
         })
 
     # 30일 윈도우의 주말/평일 일수 (일평균 계산용)
@@ -2263,6 +2304,12 @@ def get_dashboard_stats(account_id: int = None, pattern_days: int = 30, date_str
         'hourly_pattern': hourly_pattern,
         'peak_hour': f'{peak_hour:02d}시' if peak_hour is not None else None,
         'pattern_days': pattern_days,
+        # 입고필요 목록(팝업용): 현재고 < 월판매 AND 선입고 미등록
+        'restock_needed': [
+            {'product_name': o['product_name'], 'option_name': o['option_name'],
+             'last_stock': o['last_stock'], 'month_qty': o['month_qty'], 'id': o['id']}
+            for o in options if o.get('restock_needed')
+        ],
     }
 
 

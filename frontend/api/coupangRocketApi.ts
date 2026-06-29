@@ -135,6 +135,7 @@ export interface StatOption {
   month_qty: number;
   pending_restock?: number;
   total_restock?: number;
+  restock_needed?: boolean;
 }
 
 export interface BestProduct {
@@ -178,6 +179,7 @@ export interface DashboardStats {
   daily_revenue: { date: string; full_date: string; amount: number; qty: number }[];
   hourly_pattern: { hour: string; qty: number; amount: number; is_peak: boolean; today_qty: number; today_amount: number; week_qty: number; month_qty: number }[];
   peak_hour: string | null;
+  restock_needed?: { product_name: string; option_name: string; last_stock: number | null; month_qty: number; id: number }[];
 }
 
 // ── 베스트 상품 클릭 → 30일 일별 판매 + 주말/평일 비교 ──
@@ -195,7 +197,7 @@ export interface ProductDailyResp {
 // ── 쿠팡 리뷰 (데탑 수집분) ──
 export interface CoupangReview { rating: number | null; headline: string; content: string; reviewer: string; review_date: string; helpful_count: number; }
 export interface ProductReviewsResp {
-  product_key: string; count: number; avg: number;
+  product_key: string; count: number; rated_count?: number; avg: number;
   dist: Record<string, number>; reviews: CoupangReview[];
 }
 export async function getProductReviews(productKey: string): Promise<ProductReviewsResp> {
