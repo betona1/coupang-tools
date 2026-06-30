@@ -13,7 +13,7 @@ import {
   getIncreaseEvents, setIncreaseKind, type IncreaseEvent,
   getExpectedRestocks, registerExpectedRestock, deleteExpectedRestock, type ExpectedRestock,
   getProductDaily, type ProductDailyResp,
-  getProductReviews, startReviewCrawl, type ProductReviewsResp,
+  getProductReviews, startReviewCrawl, getReviewReport, type ProductReviewsResp, type ReviewReport,
   type CoupangApiAccount, type CoupangRocketProduct,
   type DashboardStats, type ProductHistory, type BestProduct,
 } from '../api/coupangRocketApi';
@@ -445,6 +445,7 @@ export default function CoupangRocketPage() {
       {restockDetailFor != null && <RestockDetailModal productId={restockDetailFor} onClose={() => setRestockDetailFor(null)} />}
       <RestockArrivedPopup />
       {stats?.restock_needed && stats.restock_needed.length > 0 && <RestockNeededPopup items={stats.restock_needed} />}
+      <ReviewIncreasePopup />
 
       {stats && (
         <Dashboard
@@ -1538,6 +1539,41 @@ function IntervalSetting() {
 }
 
 // 입고 완료(매칭) 팝업 — 오늘 자동입고된 건을 이미지+수량+시간으로 표시. "확인" 시 당일 다시 안 봄.
+// ── 리뷰 증가 리포트 팝업 (일일 크롤 후 직전 대비 증가) · "오늘 하루 안보기" ──
+function ReviewIncreasePopup() {
+  const [report, setReport] = useState<ReviewReport | null>(null);
+  const [closed, setClosed] = useState(false);
+  useEffect(() => { getReviewReport().then(setReport).catch(() => {}); }, []);
+  if (closed || !report || !report.products?.length) return null;
+  // 같은 날짜 리포트를 "오늘 하루 안보기" 했으면 숨김
+  const dismissKey = `review-report-dismiss-${report.date}`;
+  if (localStorage.getItem(dismissKey)) return null;
+  const dismiss = () => { localStorage.setItem(dismissKey, '1'); setClosed(true); };
+  return (
+    <div className="fixed bottom-4 left-4 z-40 w-[380px] bg-white border-2 border-amber-400 rounded-xl shadow-2xl overflow-hidden">
+      <div className="flex items-center gap-2 px-3 py-2 bg-amber-500 text-white">
+        <span className="font-bold">⭐ 새 리뷰 +{report.total_increase}건</span>
+        <span className="text-[11px] opacity-90">{report.date}</span>
+        <button onClick={() => setClosed(true)} className="ml-auto text-white/80 hover:text-white">✕</button>
+      </div>
+      <div className="max-h-[280px] overflow-auto divide-y">
+        {report.products.map((p, i) => (
+          <div key={i} className="px-3 py-2 text-sm flex items-center gap-2">
+            <span className="flex-1 truncate font-medium">{p.product_name}</span>
+            <span className="text-emerald-600 font-bold whitespace-nowrap">+{p.increase}</span>
+            <span className="text-gray-400 text-[11px] whitespace-nowrap">총 {p.total}</span>
+          </div>
+        ))}
+      </div>
+      <div className="px-3 py-1.5 bg-amber-50 flex items-center">
+        <label className="flex items-center gap-1.5 text-[12px] text-gray-600 cursor-pointer">
+          <input type="checkbox" onChange={(e) => { if (e.target.checked) dismiss(); }} /> 오늘 하루 안보기
+        </label>
+      </div>
+    </div>
+  );
+}
+
 // ── 입고필요 팝업 (현재고 < 1달판매 AND 선입고 미등록) ──
 function RestockNeededPopup({ items }: { items: NonNullable<DashboardStats['restock_needed']> }) {
   const [closed, setClosed] = useState(false);

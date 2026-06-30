@@ -137,6 +137,20 @@ def _save(rows):
     return len(data)
 
 
+def _record_snapshot(product_id):
+    """상품별 현재 리뷰수를 오늘 날짜 스냅샷으로 저장(증가분 리포트용). 같은날 재실행 시 갱신."""
+    try:
+        with connections["joacham"].cursor() as c:
+            c.execute("SELECT COUNT(*) FROM coupang_review WHERE product_id=%s", [str(product_id)])
+            cnt = c.fetchone()[0]
+            c.execute(
+                "INSERT INTO coupang_review_snapshot (product_id, cnt, snapshot_date) "
+                "VALUES (%s,%s,CURDATE()) ON DUPLICATE KEY UPDATE cnt=VALUES(cnt)",
+                [str(product_id), cnt])
+    except Exception:
+        pass
+
+
 def crawl_reviews(product_keys, max_pages=40, log_fn=None):
     """노출ID 목록의 리뷰를 uc로 수집해 coupang_review 적재. 진행상황 log_fn(dict) yield 가능."""
     def lg(m):
@@ -178,6 +192,7 @@ def crawl_reviews(product_keys, max_pages=40, log_fn=None):
                         break
                     time.sleep(0.6)
                 saved = _save(all_rows)
+                _record_snapshot(pid)   # 일별 스냅샷(증가분 리포트용)
                 result[pid] = {"reviews": len(all_rows), "saved": saved}
                 lg(f"{pid}: 리뷰 {len(all_rows)}건 수집/적재 {saved}")
             except Exception as e:

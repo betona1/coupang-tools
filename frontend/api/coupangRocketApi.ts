@@ -204,6 +204,16 @@ export async function getProductReviews(productKey: string): Promise<ProductRevi
   const { data } = await api.get('/coupang-rocket/product-reviews/', { params: { product_key: productKey } });
   return data;
 }
+// 리뷰 증가 리포트 (직전 스냅샷 대비)
+export interface ReviewReport {
+  date: string; total_increase: number;
+  products: { product_id: string; product_name: string; total: number; increase: number }[];
+}
+export async function getReviewReport(): Promise<ReviewReport> {
+  const { data } = await api.get('/coupang-rocket/review-report/');
+  return data;
+}
+
 // 서버에서 직접 리뷰 수집 (uc Akamai 우회) — NDJSON 스트리밍
 export async function startReviewCrawl(productKey?: string, all?: boolean): Promise<Response> {
   return fetch('/api/cpc/coupang-rocket/review-crawl/', {

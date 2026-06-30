@@ -210,21 +210,44 @@ def crawl_ads(acc, date_from=None, date_to=None, report_level='vendorItem', wait
         return {'error': '광고센터 로그인 실패', 'inserted': 0}
     try:
         lg(f'캠페인 목록 조회 {date_from}~{date_to}...')
-        camp = _gql(driver, _campaign_body(s, e))
-        try:
-            campaigns = [str(r['id']) for r in camp[0]['data']['getCampaignList']]
-        except (KeyError, IndexError, TypeError):
-            return {'error': f'캠페인 조회 실패: {json.dumps(camp, ensure_ascii=False)[:300]}', 'inserted': 0}
+        # advertising.coupang.com 세션이 간헐적으로 null 반환 → 세션 새로고침 후 재시도(최대 3회)
+        campaigns = None
+        for attempt in range(3):
+            camp = _gql(driver, _campaign_body(s, e))
+            try:
+                lst = camp[0]['data']['getCampaignList']
+                if lst is not None:
+                    campaigns = [str(r['id']) for r in lst]
+                    break
+            except (KeyError, IndexError, TypeError):
+                pass
+            if attempt < 2:
+                lg(f'  캠페인 null — 세션 새로고침 재시도({attempt + 1}/2)')
+                try:
+                    driver.get(ORIGIN + '/marketing/dashboard/sales'); time.sleep(6)
+                except Exception:
+                    pass
+        if campaigns is None:
+            return {'error': f'캠페인 조회 실패(3회): {json.dumps(camp, ensure_ascii=False)[:200]}', 'inserted': 0}
         lg(f'캠페인 {len(campaigns)}개')
         if not campaigns:
             return {'error': '기간 내 캠페인 없음', 'inserted': 0}
 
         lg('보고서 생성 요청(requestReport, 상품단위 일별)...')
-        req = _gql(driver, _request_body(s, e, campaigns, granularity=report_level))
-        try:
-            report_id = req[0]['data']['requestReport']['id']
-        except (KeyError, IndexError, TypeError):
-            return {'error': f'보고서 요청 실패: {json.dumps(req, ensure_ascii=False)[:300]}', 'inserted': 0}
+        report_id = None
+        for attempt in range(3):
+            req = _gql(driver, _request_body(s, e, campaigns, granularity=report_level))
+            try:
+                rid = req[0]['data']['requestReport']
+                if rid and rid.get('id'):
+                    report_id = rid['id']; break
+            except (KeyError, IndexError, TypeError):
+                pass
+            if attempt < 2:
+                lg(f'  보고서요청 null — 재시도({attempt + 1}/2)')
+                time.sleep(5)
+        if report_id is None:
+            return {'error': f'보고서 요청 실패(3회): {json.dumps(req, ensure_ascii=False)[:200]}', 'inserted': 0}
         lg(f'보고서 ID {report_id} — 생성 대기...')
 
         ready = False

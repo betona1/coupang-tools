@@ -1,6 +1,6 @@
 """쿠팡 가구매방(crossbuy) 크롤 → FakePurchaseManual 적재.
 
-가구매방(GAGUMAE_BASE, .env 설정)은 서버에서 직접 접근 가능(Akamai 없음, 로그인 requests).
+가구매방(GAGUMAE_BASE)은 서버에서 직접 접근 가능(Akamai 없음, 로그인 requests).
 열린 구매방의 '내 상품' + 배정(designation)을 읽어, **구매완료(purchased=1)** 건을
 우리 '쿠팡 가구매(FakePurchaseManual)'에 받는사람·금액·옵션·입금자 정보로 적재한다.
 

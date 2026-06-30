@@ -1030,33 +1030,45 @@ def get_product_reviews(product_key, limit=200):
 
 
 def get_review_report():
-    """오늘 새로 들어온 리뷰(증가분) 상품별 리포트. collected_at=오늘 기준.
-    일일 리뷰 크롤 후 팝업으로 '리뷰 N건 증가' 보고용."""
+    """리뷰 증가 리포트 — 직전 스냅샷 대비 증가분(상품별). 일일 크롤 후 팝업용.
+    스냅샷(coupang_review_snapshot)에서 각 상품의 최신 vs 직전 cnt 차이."""
     rows = []
+    latest_date = None
     try:
         with connections['joacham'].cursor() as c:
-            c.execute(
-                "SELECT product_id, COUNT(*) total, "
-                "SUM(DATE(collected_at)=CURDATE()) new_today "
-                "FROM coupang_review GROUP BY product_id HAVING new_today > 0 "
-                "ORDER BY new_today DESC")
-            data = c.fetchall()
-        # 상품명 매핑(ads DB)
-        pids = [str(r[0]) for r in data]
-        names = {}
-        if pids:
+            # 상품별 최신 2개 스냅샷
+            c.execute("SELECT product_id, snapshot_date, cnt FROM coupang_review_snapshot "
+                      "ORDER BY product_id, snapshot_date DESC")
+            from collections import defaultdict
+            snaps = defaultdict(list)
+            for pid, d, cnt in c.fetchall():
+                snaps[str(pid)].append((d, int(cnt)))
+        # 증가분 계산
+        prod_rows = []
+        for pid, lst in snaps.items():
+            cur_d, cur = lst[0]
+            prev = lst[1][1] if len(lst) > 1 else cur   # 직전 없으면(첫 스냅샷=baseline) 증가0 처리
+            inc = cur - prev
+            if latest_date is None or str(cur_d) > str(latest_date):
+                latest_date = cur_d
+            if inc > 0:
+                prod_rows.append({'product_id': pid, 'total': cur, 'increase': inc})
+        # 상품명
+        if prod_rows:
+            pids = [r['product_id'] for r in prod_rows]
             ph = ','.join(['%s'] * len(pids))
             with connections['default'].cursor() as c2:
                 c2.execute(f"SELECT seller_product_id, MIN(product_name) FROM cupang_rocket_product "
                            f"WHERE seller_product_id IN ({ph}) GROUP BY seller_product_id", pids)
                 names = {str(a): b for a, b in c2.fetchall()}
-        for pid, total, new_today in data:
-            rows.append({'product_id': str(pid), 'product_name': names.get(str(pid), str(pid)),
-                         'total': int(total), 'new_today': int(new_today or 0)})
+            for r in prod_rows:
+                r['product_name'] = names.get(r['product_id'], r['product_id'])
+        prod_rows.sort(key=lambda x: -x['increase'])
+        rows = prod_rows
     except Exception:
         pass
-    return {'date': str(__import__('datetime').date.today()),
-            'total_new': sum(r['new_today'] for r in rows), 'products': rows}
+    return {'date': str(latest_date) if latest_date else '',
+            'total_increase': sum(r['increase'] for r in rows), 'products': rows}
 
 
 def get_reviews_summary(product_keys):
