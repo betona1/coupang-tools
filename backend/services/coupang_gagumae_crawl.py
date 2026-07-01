@@ -31,33 +31,107 @@ def _env(key, default=""):
     return default
 
 
-BASE = _env("GAGUMAE_BASE", "")
-USER = _env("GAGUMAE_USER", "")
-PW = _env("GAGUMAE_PW", "")
-API = BASE + "/dashboard/crossbuy/api.php?action="
+def _creds():
+    """가구매방 접속정보: DB 설정(fake_purchase_config) 우선 → .env 폴백."""
+    base = user = pw = ""
+    try:
+        with connections["default"].cursor() as c:
+            c.execute("SELECT gagumae_base, gagumae_user, gagumae_pw FROM fake_purchase_config LIMIT 1")
+            row = c.fetchone()
+            if row:
+                base, user, pw = (row[0] or ""), (row[1] or ""), (row[2] or "")
+    except Exception:
+        pass
+    return (base or _env("GAGUMAE_BASE", ""),
+            user or _env("GAGUMAE_USER", ""),
+            pw or _env("GAGUMAE_PW", ""))
+
+
+BASE, USER, PW = _creds()   # 하위호환(모듈로드 값). 실제 호출은 _creds() 동적.
 
 
 def _session():
+    base, user, pw = _creds()
+    if not (base and user and pw):
+        raise RuntimeError("가구매방 접속정보 미설정 (가구매 설정 또는 .env GAGUMAE_*)")
     s = requests.Session()
     s.headers.update({"User-Agent": "Mozilla/5.0", "Content-Type": "application/json"})
-    r = s.post(BASE + "/dashboard/api/login.php",
-               data=json.dumps({"username": USER, "password": PW}), timeout=20)
+    s._base = base
+    r = s.post(base + "/dashboard/api/login.php",
+               data=json.dumps({"username": user, "password": pw}), timeout=20)
     d = r.json()
     if not d.get("ok"):
         raise RuntimeError(f"가구매방 로그인 실패: {d}")
     return s
 
 
+def _api(base):
+    return base + "/dashboard/crossbuy/api.php?action="
+
+
+def enter_room(room_id, participation_type="mutual"):
+    """구매방 입장(참여). join_room 액션(신규참여). 이미 참여면 update_my_participation으로 폴백. 성공 시 {ok}."""
+    s = _session()
+    api = _api(s._base)
+    r = s.post(api + "join_room",
+               data=json.dumps({"room_id": int(room_id), "participation_type": participation_type}),
+               timeout=20)
+    try:
+        d = r.json()
+    except Exception:
+        return {"ok": False, "error": r.text[:150]}
+    # 이미 참여 중이면 join이 실패할 수 있음 → 성공 취급(멱등)
+    if d.get("ok") or "이미" in str(d.get("error", "")):
+        return {"ok": True, **d}
+    return d
+
+
+def check_login():
+    """치트키 가구매방 로그인/접속 체크. 성공 시 {ok, user, base, rooms수}."""
+    base0,user0,pw0=_creds()
+    if not (base0 and user0 and pw0):
+        return {'ok': False, 'error': '가구매방 접속정보(.env GAGUMAE_*) 미설정'}
+    try:
+        s = _session()   # 로그인 시도(실패 시 예외)
+        rooms = list_rooms(s)
+        open_room = next((r for r in rooms if r.get("is_open")), None)
+        return {'ok': True, 'user': user0, 'base': base0,
+                'rooms': len(rooms),
+                'open_room': open_room,          # 현재 열린 방(입장가능) or None
+                'latest_room': rooms[0] if rooms else None}
+    except Exception as e:
+        return {'ok': False, 'error': str(e)[:200]}
+
+
 def list_rooms(s):
-    """열린/지난 구매방 목록 (index 페이지 파싱)."""
+    """구매방 목록 (index 페이지 파싱) + 열림/닫힘 상태.
+    'feature-card open'=현재 열린 방(입장가능), 'prev'=지난 방."""
     import re
-    html = s.get(BASE + "/dashboard/keyword/index.php", timeout=20).text
+    html = s.get(s._base + "/dashboard/keyword/index.php", timeout=20).text
     rooms = []
-    for m in re.finditer(r"room\.php\?id=(\d+)'[^>]*>.*?(\d{4}-\d{2}-\d{2})\s*맞구매방", html, re.S):
-        rid, date = int(m.group(1)), m.group(2)
+    # feature-card <상태> ... room.php?id=N ... YYYY-MM-DD 맞구매방
+    for m in re.finditer(
+            r"feature-card\s+(open|prev)[^>]*room\.php\?id=(\d+)'.*?(\d{4}-\d{2}-\d{2})\s*맞구매방",
+            html, re.S):
+        status, rid, date = m.group(1), int(m.group(2)), m.group(3)
         if not any(x["id"] == rid for x in rooms):
-            rooms.append({"id": rid, "date": date})
+            rooms.append({"id": rid, "date": date, "is_open": status == "open"})
+    # 폴백(클래스 매칭 실패 시)
+    if not rooms:
+        for m in re.finditer(r"room\.php\?id=(\d+)'[^>]*>.*?(\d{4}-\d{2}-\d{2})\s*맞구매방", html, re.S):
+            rid, date = int(m.group(1)), m.group(2)
+            if not any(x["id"] == rid for x in rooms):
+                rooms.append({"id": rid, "date": date, "is_open": False})
     return rooms
+
+
+def get_open_room():
+    """현재 열린 방(입장가능) 반환. 없으면 None (아직 안 열림)."""
+    s = _session()
+    for r in list_rooms(s):
+        if r.get("is_open"):
+            return r
+    return None
 
 
 def _rocket_cost_map():
@@ -83,7 +157,7 @@ def _rocket_cost_map():
 def crawl_room(room_id, only_purchased=True):
     """방 한 개의 내 상품 + 배정을 표준 dict 목록으로 반환."""
     s = _session()
-    r = s.get(API + f"my_products&room_id={room_id}", timeout=25)
+    r = s.get(_api(s._base) + f"my_products&room_id={room_id}", timeout=25)
     prods = r.json().get("products", [])
     rmap = _rocket_cost_map()
     rooms = {x["id"]: x["date"] for x in list_rooms(s)}
