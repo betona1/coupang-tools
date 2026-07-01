@@ -204,19 +204,34 @@ function GagumaePanel({ onPushed }: { onPushed?: () => void }) {
   const [pushed, setPushed] = useState<Set<number>>(new Set());
   const enteredRef = useRef(false);
 
+  // 중복방지 키: 구매자명 + 계좌숫자 + 상품명 (같은 사람·계좌·상품이면 동일건)
+  const buyerKey = (b: GagumaeBuyer) => `${b.buyer_name || b.buyer_username || ''}|${(b.buyer_account || '').replace(/\D/g, '')}|${b.product_name}`;
+  const manualKeyOf = (m: ManualEntry) => `${m.recipient || ''}|${(m.deposit_memo || '').replace(/\D/g, '')}|${m.product_name}`;
+
   const loadBuyers = async (save = false) => {
     setBuyersBusy(true); setMsg(save ? '구매자 계좌 저장 중...' : '가구매방에서 가져오는 중...');
     try {
       const r = await getGagumaeBuyers(status?.open_room?.id, save);
       if (r.error) { setMsg(`❌ ${r.error}`); setBuyers([]); }
-      else { setBuyers(r.buyers); setPushed(new Set()); setMsg(save ? `💾 ${r.saved ?? r.count}명 계좌 저장됨` : `📥 가구매자 ${r.count}명 가져옴`); }
+      else {
+        setBuyers(r.buyers);
+        // 기존 처리중/완료(수동입력)과 대조 → 이미 넘긴 구매자는 ✓넘김 처리하여 중복 방지
+        let existing = new Set<string>();
+        try { existing = new Set((await getManual()).filter(m => m.site_name === '치트키가구매').map(manualKeyOf)); } catch {}
+        const dup = new Set<number>();
+        r.buyers.forEach((b, i) => { if (existing.has(buyerKey(b))) dup.add(i); });
+        setPushed(dup);
+        const fresh = r.buyers.length - dup.size;
+        setMsg(save ? `💾 ${r.saved ?? r.count}명 계좌 저장됨` : `📥 가구매자 ${r.count}명 (신규 ${fresh}명 · 기넘김 ${dup.size}명)`);
+      }
     } catch (e: any) { setMsg(`❌ ${String(e?.message || e).slice(0, 80)}`); }
     finally { setBuyersBusy(false); }
   };
 
-  // 가구매자 → 가구매 처리중(수동입력)으로 넘기기
+  // 가구매자 → 가구매 처리중(수동입력)으로 넘기기 (이미 넘긴 건은 스킵)
   const today = () => new Date().toISOString().slice(0, 10);
   const pushOne = async (b: GagumaeBuyer, idx: number) => {
+    if (pushed.has(idx)) return;   // 중복 방지
     await createManual({
       purchase_date: today(),
       recipient: b.buyer_name || b.buyer_username || '',
