@@ -1,4 +1,5 @@
 import { useState, useEffect, useCallback, useRef, type ReactNode } from 'react';
+import * as XLSX from 'xlsx';
 import {
   getSales, markFake, getMarks, batchTransfer, updateMark, lookupCost, lookupShipping, getFakeConfig, setDefaultShipping,
   getManual, createManual, updateManual, batchTransferManual, deleteManual,
@@ -8,6 +9,29 @@ import {
 } from '../api/fakePurchaseApi';
 
 const won = (n: number) => '₩' + (n || 0).toLocaleString();
+
+// 구매자 리스트 → 엑셀 내보내기 (계좌번호 포함)
+function exportBuyersExcel(buyers: GagumaeBuyer[], roomDate?: string) {
+  if (!buyers?.length) return;
+  const rows = buyers.map(b => ({
+    상품: b.product_name,
+    옵션: b.option_text || '',
+    배송타입: b.shipping_type,
+    수량: b.quantity,
+    금액: b.price,
+    구매자: b.buyer_name || b.buyer_username || '',
+    아이디: b.buyer_username || '',
+    은행: b.buyer_bank || '',
+    계좌번호: b.buyer_account || '',
+    예금주: b.buyer_depositor || '',
+  }));
+  const ws = XLSX.utils.json_to_sheet(rows);
+  ws['!cols'] = [{ wch: 30 }, { wch: 14 }, { wch: 10 }, { wch: 6 }, { wch: 10 }, { wch: 10 }, { wch: 14 }, { wch: 12 }, { wch: 18 }, { wch: 10 }];
+  const wb = XLSX.utils.book_new();
+  XLSX.utils.book_append_sheet(wb, ws, '구매자');
+  const tag = (roomDate || '').replace(/[^0-9]/g, '') || 'room';
+  XLSX.writeFile(wb, `구매자계좌_${tag}.xlsx`);
+}
 
 export default function FakePurchasePage() {
   const [tab, setTab] = useState<'sales' | 'fake'>('sales');
@@ -285,8 +309,10 @@ function GagumaePanel() {
           <div className="flex items-center gap-2 mb-1">
             <span className="font-semibold text-sm">나의 구매자 리스트</span>
             <span className="text-[11px] text-gray-400">{buyers.length}명</span>
+            <button onClick={() => exportBuyersExcel(buyers, status?.open_room?.date)} disabled={!buyers.length}
+              className="ml-auto text-xs px-2 py-1 rounded bg-green-700 text-white font-semibold disabled:opacity-50">📥 엑셀</button>
             <button onClick={() => loadBuyers(true)} disabled={buyersBusy || !buyers.length}
-              className="ml-auto text-xs px-2 py-1 rounded bg-emerald-600 text-white font-semibold disabled:opacity-50">💾 계좌 저장</button>
+              className="text-xs px-2 py-1 rounded bg-emerald-600 text-white font-semibold disabled:opacity-50">💾 계좌 저장</button>
             <button onClick={() => setBuyers(null)} className="text-xs px-2 py-1 rounded border">닫기</button>
           </div>
           {!buyers.length ? <div className="text-[12px] text-gray-400 py-2">구매자가 없습니다.</div> : (
