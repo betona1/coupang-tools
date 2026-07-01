@@ -140,6 +140,73 @@ def get_open_room():
     return None
 
 
+def _shipping_type(source_url, external_product_id):
+    """상품 URL의 vendorItemId 로 배송타입 판별.
+    로켓옵션ID(vendor_item_id) 매칭=로켓, 판매자윙옵션ID(marketplace_vendor_item_id) 매칭=일반배송(박스).
+    미매칭=판매자배송 추정(일반)."""
+    import re
+    m = re.search(r"vendorItemId=(\d+)", source_url or "")
+    vid = m.group(1) if m else ""
+    if vid:
+        with connections["default"].cursor() as c:
+            c.execute("SELECT vendor_item_id, marketplace_vendor_item_id FROM cupang_rocket_product "
+                      "WHERE vendor_item_id=%s OR marketplace_vendor_item_id=%s LIMIT 1", [vid, vid])
+            r = c.fetchone()
+            if r:
+                if str(r[0]) == vid:
+                    return "로켓"        # 로켓그로스 옵션ID
+                if str(r[1]) == vid:
+                    return "일반배송"     # 판매자윙(마켓플레이스) = 박스발송
+    return "일반배송"   # 미추적/윙상품 → 일반배송(박스) 기본
+
+
+def get_buyer_list(room_id):
+    """방의 내 상품별 구매자 배정 리스트 + 배송타입(로켓/일반배송). '나의 구매자 리스트' 표시용."""
+    s = _session()
+    r = s.get(_api(s._base) + f"my_products&room_id={room_id}", timeout=25).json()
+    out = []
+    for p in (r.get("products") or []):
+        ship = _shipping_type(p.get("source_url"), p.get("external_product_id"))
+        for d in (p.get("designations") or []):
+            out.append({
+                "product_name": (p.get("product_name") or "").split(" - ")[0][:50],
+                "external_product_id": p.get("external_product_id"),
+                "source_url": p.get("source_url"),
+                "shipping_type": ship,                 # 로켓 / 일반배송(박스)
+                "option_text": d.get("option_text") or "",
+                "quantity": d.get("quantity"),
+                "price": d.get("price"),
+                "buyer_name": d.get("buyer_name") or d.get("buyer_user_name") or "",
+                "buyer_username": d.get("buyer_username") or "",
+                "buyer_bank": d.get("buyer_bank") or "",
+                "buyer_account": d.get("buyer_account_number") or "",
+                "buyer_depositor": d.get("buyer_depositor_name") or "",
+                "purchased": bool(d.get("purchased")),
+            })
+    return {"room_id": int(room_id), "count": len(out), "buyers": out}
+
+
+def save_buyers(room_id):
+    """방의 구매자 리스트(계좌번호 포함)를 coupang_gagumae_buyer 에 저장(UPSERT)."""
+    data = get_buyer_list(room_id)
+    rows = data["buyers"]
+    if not rows:
+        return {"saved": 0, "buyers": []}
+    sql = ("INSERT INTO coupang_gagumae_buyer "
+           "(room_id, external_product_id, product_name, shipping_type, option_text, quantity, "
+           "price, buyer_name, buyer_username, buyer_bank, buyer_account, buyer_depositor, purchased) "
+           "VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s) "
+           "ON DUPLICATE KEY UPDATE price=VALUES(price), buyer_bank=VALUES(buyer_bank), "
+           "buyer_account=VALUES(buyer_account), buyer_depositor=VALUES(buyer_depositor), "
+           "shipping_type=VALUES(shipping_type), quantity=VALUES(quantity), purchased=VALUES(purchased)")
+    vals = [(room_id, b["external_product_id"], b["product_name"], b["shipping_type"], b["option_text"],
+             b["quantity"], b["price"], b["buyer_name"], b["buyer_username"], b["buyer_bank"],
+             b["buyer_account"], b["buyer_depositor"], 1 if b["purchased"] else 0) for b in rows]
+    with connections["default"].cursor() as c:
+        c.executemany(sql, vals)
+    return {"saved": len(vals), "buyers": rows}
+
+
 def my_products_count(room_id, s=None):
     """해당 방에 내가 등록한 상품 수 + 구매자배정 수. 상품등록 여부 판단용."""
     s = s or _session()

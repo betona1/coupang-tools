@@ -184,3 +184,15 @@ export async function checkGagumae(): Promise<GagumaeStatus> {
 export async function enterGagumaeRoom(roomId?: number): Promise<any> {
   const { data } = await api.post('/fake-purchase/gagumae/enter/', roomId ? { room_id: roomId } : {}); return data;
 }
+
+export interface GagumaeBuyer {
+  product_name: string; external_product_id: string; source_url: string;
+  shipping_type: string; option_text: string; quantity: number; price: number;
+  buyer_name: string; buyer_username: string; buyer_bank: string;
+  buyer_account: string; buyer_depositor: string; purchased: boolean;
+}
+export async function getGagumaeBuyers(roomId?: number, save?: boolean): Promise<{ count: number; buyers: GagumaeBuyer[]; saved?: number; error?: string }> {
+  const params: Record<string, any> = {}; if (roomId) params.room_id = roomId; if (save) params.save = 1;
+  const { data } = await api.get('/fake-purchase/gagumae/buyers/', { params });
+  return data;
+}

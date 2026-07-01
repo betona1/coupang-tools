@@ -2,9 +2,9 @@ import { useState, useEffect, useCallback, useRef, type ReactNode } from 'react'
 import {
   getSales, markFake, getMarks, batchTransfer, updateMark, lookupCost, lookupShipping, getFakeConfig, setDefaultShipping,
   getManual, createManual, updateManual, batchTransferManual, deleteManual,
-  getGagumaeConfig, saveGagumaeConfig, checkGagumae, enterGagumaeRoom,
+  getGagumaeConfig, saveGagumaeConfig, checkGagumae, enterGagumaeRoom, getGagumaeBuyers,
   type SalesResponse, type SaleRow, type FakeMark, type ManualEntry, type CostCandidate,
-  type GagumaeConfig, type GagumaeStatus,
+  type GagumaeConfig, type GagumaeStatus, type GagumaeBuyer,
 } from '../api/fakePurchaseApi';
 
 const won = (n: number) => '₩' + (n || 0).toLocaleString();
@@ -174,7 +174,19 @@ function GagumaePanel() {
   const [showSettings, setShowSettings] = useState(false);
   const [form, setForm] = useState({ base: '', user: '', pw: '', auto_enter: true, start_hour: 16, retry_min: 5, fail_notify_min: 30, telegram: true });
   const [msg, setMsg] = useState('');
+  const [buyers, setBuyers] = useState<GagumaeBuyer[] | null>(null);
+  const [buyersBusy, setBuyersBusy] = useState(false);
   const enteredRef = useRef(false);
+
+  const loadBuyers = async (save = false) => {
+    setBuyersBusy(true); setMsg(save ? '구매자 계좌 저장 중...' : '구매자 리스트 조회 중...');
+    try {
+      const r = await getGagumaeBuyers(status?.open_room?.id, save);
+      if (r.error) { setMsg(`❌ ${r.error}`); setBuyers([]); }
+      else { setBuyers(r.buyers); setMsg(save ? `💾 ${r.saved ?? r.count}명 계좌 저장됨` : `👥 구매자 ${r.count}명`); }
+    } catch (e: any) { setMsg(`❌ ${String(e?.message || e).slice(0, 80)}`); }
+    finally { setBuyersBusy(false); }
+  };
 
   const check = useCallback(async () => {
     setChecking(true);
@@ -230,6 +242,7 @@ function GagumaePanel() {
         {status?.ok && <span className="text-[11px] text-gray-400">{status.user} · 방 {status.rooms}개</span>}
         <div className="ml-auto flex items-center gap-2">
           <button onClick={check} className="text-xs px-2 py-1 rounded border">새로고침</button>
+          {(room || status?.my_register) && <button onClick={() => loadBuyers(false)} disabled={buyersBusy} className="text-xs px-2 py-1 rounded border text-indigo-600 disabled:opacity-50">👥 구매자</button>}
           {room && <button onClick={enter} className="text-xs px-2 py-1 rounded bg-[#7c3aed] text-white font-semibold">입장</button>}
           {status?.base && (status.latest_room || room) && (
             <a href={`${status.base}/dashboard/crossbuy/room.php?id=${(room || status.latest_room)!.id}`} target="_blank" rel="noreferrer"
@@ -264,6 +277,56 @@ function GagumaePanel() {
           </div>
           <div className="text-[11px] text-gray-400">매주 수요일 {form.start_hour}시부터 {form.retry_min}분마다 입장 시도 · 성공 시 종료 · 실패 시 {form.fail_notify_min}분마다 알림</div>
           <button onClick={save} className="px-3 py-1.5 rounded bg-[#7c3aed] text-white font-semibold">저장</button>
+        </div>
+      )}
+      {/* 나의 구매자 리스트 (배송타입 + 계좌번호) */}
+      {buyers && (
+        <div className="mt-2 pt-2 border-t">
+          <div className="flex items-center gap-2 mb-1">
+            <span className="font-semibold text-sm">나의 구매자 리스트</span>
+            <span className="text-[11px] text-gray-400">{buyers.length}명</span>
+            <button onClick={() => loadBuyers(true)} disabled={buyersBusy || !buyers.length}
+              className="ml-auto text-xs px-2 py-1 rounded bg-emerald-600 text-white font-semibold disabled:opacity-50">💾 계좌 저장</button>
+            <button onClick={() => setBuyers(null)} className="text-xs px-2 py-1 rounded border">닫기</button>
+          </div>
+          {!buyers.length ? <div className="text-[12px] text-gray-400 py-2">구매자가 없습니다.</div> : (
+            <div className="overflow-x-auto">
+              <table className="w-full text-[12px] border-collapse">
+                <thead>
+                  <tr className="bg-gray-100 text-gray-600">
+                    <th className="px-2 py-1 text-left">상품</th>
+                    <th className="px-2 py-1 text-left">옵션</th>
+                    <th className="px-2 py-1 text-center">배송</th>
+                    <th className="px-2 py-1 text-right">수량</th>
+                    <th className="px-2 py-1 text-right">금액</th>
+                    <th className="px-2 py-1 text-left">구매자</th>
+                    <th className="px-2 py-1 text-left">계좌 (은행/번호/예금주)</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {buyers.map((b, i) => (
+                    <tr key={i} className="border-b hover:bg-purple-50/40">
+                      <td className="px-2 py-1 max-w-[220px] truncate" title={b.product_name}>{b.product_name}</td>
+                      <td className="px-2 py-1 text-gray-500">{b.option_text || '-'}</td>
+                      <td className="px-2 py-1 text-center">
+                        <span className={`px-1.5 py-0.5 rounded-full text-[10px] font-bold ${b.shipping_type === '로켓' ? 'bg-blue-100 text-blue-700' : 'bg-orange-100 text-orange-700'}`}>
+                          {b.shipping_type === '로켓' ? '🚀 로켓' : '📦 일반배송'}
+                        </span>
+                      </td>
+                      <td className="px-2 py-1 text-right">{b.quantity}</td>
+                      <td className="px-2 py-1 text-right">{Number(b.price || 0).toLocaleString()}</td>
+                      <td className="px-2 py-1 font-medium">{b.buyer_name || b.buyer_username || '-'}</td>
+                      <td className="px-2 py-1">
+                        {b.buyer_account
+                          ? <span className="font-mono">{b.buyer_bank} {b.buyer_account}{b.buyer_depositor ? ` (${b.buyer_depositor})` : ''}</span>
+                          : <span className="text-gray-300">미지정</span>}
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          )}
         </div>
       )}
     </div>
