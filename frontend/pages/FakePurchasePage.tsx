@@ -240,6 +240,15 @@ function GagumaePanel() {
       </div>
       {msg && <div className="text-[11px] text-gray-500 mt-1">{msg}</div>}
       {!status?.ok && status?.error && <div className="text-[11px] text-red-500 mt-1">{status.error}</div>}
+      {/* 상품등록 알람 (열린방인데 내 상품 0개 → 목 12시 마감) */}
+      {status?.need_register && status.open_room && (
+        <div className="mt-2 flex items-center gap-2 flex-wrap bg-red-50 border-2 border-red-300 rounded-lg px-3 py-2 animate-pulse">
+          <span className="text-red-600 font-bold">🛒 맞구매 상품등록 해야합니다!</span>
+          <span className="text-[12px] text-red-500">⏰ 목요일 12시 마감 · {status.open_room.date} 맞구매방</span>
+          <button onClick={async () => { await enterGagumaeRoom(status.open_room!.id); window.open(`${status.base}/dashboard/crossbuy/room.php?id=${status.open_room!.id}`, '_blank'); }}
+            className="ml-auto text-sm px-3 py-1 rounded bg-red-600 text-white font-bold hover:bg-red-700">상품등록 하러가기 🔗</button>
+        </div>
+      )}
       {showSettings && (
         <div className="mt-2 pt-2 border-t space-y-2 text-sm">
           <div className="flex items-end gap-2 flex-wrap">

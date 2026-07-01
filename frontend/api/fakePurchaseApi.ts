@@ -169,6 +169,8 @@ export interface GagumaeStatus {
   ok: boolean; error?: string; user?: string; base?: string; rooms?: number;
   open_room?: { id: number; date: string; is_open: boolean } | null;
   latest_room?: { id: number; date: string; is_open: boolean } | null;
+  my_register?: { products: number; designations: number } | null;
+  need_register?: boolean;
 }
 export async function getGagumaeConfig(): Promise<GagumaeConfig> {
   const { data } = await api.get('/fake-purchase/gagumae/config/'); return data;

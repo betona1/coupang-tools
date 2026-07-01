@@ -95,9 +95,15 @@ def check_login():
         s = _session()   # 로그인 시도(실패 시 예외)
         rooms = list_rooms(s)
         open_room = next((r for r in rooms if r.get("is_open")), None)
+        # 열린 방이 있으면 내 상품등록 상태 조회 (등록 알람용)
+        reg = None
+        if open_room:
+            reg = my_products_count(open_room["id"], s=s)
         return {'ok': True, 'user': user0, 'base': base0,
                 'rooms': len(rooms),
                 'open_room': open_room,          # 현재 열린 방(입장가능) or None
+                'my_register': reg,               # {products, designations} or None
+                'need_register': bool(open_room and reg and reg["products"] == 0),
                 'latest_room': rooms[0] if rooms else None}
     except Exception as e:
         return {'ok': False, 'error': str(e)[:200]}
@@ -132,6 +138,18 @@ def get_open_room():
         if r.get("is_open"):
             return r
     return None
+
+
+def my_products_count(room_id, s=None):
+    """해당 방에 내가 등록한 상품 수 + 구매자배정 수. 상품등록 여부 판단용."""
+    s = s or _session()
+    try:
+        r = s.get(_api(s._base) + f"my_products&room_id={room_id}", timeout=20).json()
+        prods = r.get("products", []) or []
+        desig = sum(len(p.get("designations") or []) for p in prods)
+        return {"products": len(prods), "designations": desig}
+    except Exception:
+        return {"products": 0, "designations": 0}
 
 
 def _rocket_cost_map():
