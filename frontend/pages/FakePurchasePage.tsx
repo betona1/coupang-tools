@@ -10,27 +10,28 @@ import {
 
 const won = (n: number) => '₩' + (n || 0).toLocaleString();
 
-// 구매자 리스트 → 엑셀 내보내기 (계좌번호 포함)
+// 구매자 리스트 → 우리은행 대량이체 양식 (헤더 없음, 은행/계좌/금액/예금주/통장표시)
 function exportBuyersExcel(buyers: GagumaeBuyer[], roomDate?: string) {
   if (!buyers?.length) return;
-  const rows = buyers.map(b => ({
-    상품: b.product_name,
-    옵션: b.option_text || '',
-    배송타입: b.shipping_type,
-    수량: b.quantity,
-    금액: b.price,
-    구매자: b.buyer_name || b.buyer_username || '',
-    아이디: b.buyer_username || '',
-    은행: b.buyer_bank || '',
-    계좌번호: b.buyer_account || '',
-    예금주: b.buyer_depositor || '',
-  }));
-  const ws = XLSX.utils.json_to_sheet(rows);
-  ws['!cols'] = [{ wch: 30 }, { wch: 14 }, { wch: 10 }, { wch: 6 }, { wch: 10 }, { wch: 10 }, { wch: 14 }, { wch: 12 }, { wch: 18 }, { wch: 10 }];
+  const aoa = buyers
+    .filter(b => (b.buyer_account || '').replace(/\D/g, ''))   // 계좌번호 있는 것만
+    .map(b => {
+      const name = b.buyer_depositor || b.buyer_name || b.buyer_username || '';
+      return [
+        b.buyer_bank || '',                        // 은행
+        (b.buyer_account || '').replace(/\D/g, ''), // 계좌번호 (숫자만)
+        Number(b.price || 0),                       // 금액
+        name,                                       // 예금주
+        name,                                       // 통장표시(적요)
+      ];
+    });
+  if (!aoa.length) { alert('계좌번호가 있는 구매자가 없습니다.'); return; }
+  const ws = XLSX.utils.aoa_to_sheet(aoa);
+  ws['!cols'] = [{ wch: 12 }, { wch: 18 }, { wch: 12 }, { wch: 10 }, { wch: 12 }];
   const wb = XLSX.utils.book_new();
-  XLSX.utils.book_append_sheet(wb, ws, '구매자');
+  XLSX.utils.book_append_sheet(wb, ws, 'Sheet1');
   const tag = (roomDate || '').replace(/[^0-9]/g, '') || 'room';
-  XLSX.writeFile(wb, `구매자계좌_${tag}.xlsx`);
+  XLSX.writeFile(wb, `구매자계좌_${tag}.xls`, { bookType: 'biff8' });
 }
 
 export default function FakePurchasePage() {
