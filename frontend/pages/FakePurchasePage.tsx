@@ -86,7 +86,7 @@ export default function FakePurchasePage() {
         {loading && tab === 'sales' && <span className="text-xs text-gray-400 animate-pulse">불러오는 중...</span>}
       </div>
 
-      <GagumaePanel />
+      <GagumaePanel onPushed={() => { setManualKey(k => k + 1); setTab('fake'); }} />
 
       {tab === 'sales' && (
       <>
@@ -192,7 +192,7 @@ function Sum({ label, value, color }: { label: string; value: string; color?: st
 }
 
 // ── 치트키 가구매방 패널 (자동입장·설정·접속상태·입장) ──
-function GagumaePanel() {
+function GagumaePanel({ onPushed }: { onPushed?: () => void }) {
   const [cfg, setCfg] = useState<GagumaeConfig | null>(null);
   const [status, setStatus] = useState<GagumaeStatus | null>(null);
   const [checking, setChecking] = useState(false);
@@ -201,14 +201,43 @@ function GagumaePanel() {
   const [msg, setMsg] = useState('');
   const [buyers, setBuyers] = useState<GagumaeBuyer[] | null>(null);
   const [buyersBusy, setBuyersBusy] = useState(false);
+  const [pushed, setPushed] = useState<Set<number>>(new Set());
   const enteredRef = useRef(false);
 
   const loadBuyers = async (save = false) => {
-    setBuyersBusy(true); setMsg(save ? '구매자 계좌 저장 중...' : '구매자 리스트 조회 중...');
+    setBuyersBusy(true); setMsg(save ? '구매자 계좌 저장 중...' : '가구매방에서 가져오는 중...');
     try {
       const r = await getGagumaeBuyers(status?.open_room?.id, save);
       if (r.error) { setMsg(`❌ ${r.error}`); setBuyers([]); }
-      else { setBuyers(r.buyers); setMsg(save ? `💾 ${r.saved ?? r.count}명 계좌 저장됨` : `👥 구매자 ${r.count}명`); }
+      else { setBuyers(r.buyers); setPushed(new Set()); setMsg(save ? `💾 ${r.saved ?? r.count}명 계좌 저장됨` : `📥 가구매자 ${r.count}명 가져옴`); }
+    } catch (e: any) { setMsg(`❌ ${String(e?.message || e).slice(0, 80)}`); }
+    finally { setBuyersBusy(false); }
+  };
+
+  // 가구매자 → 가구매 처리중(수동입력)으로 넘기기
+  const today = () => new Date().toISOString().slice(0, 10);
+  const pushOne = async (b: GagumaeBuyer, idx: number) => {
+    await createManual({
+      purchase_date: today(),
+      recipient: b.buyer_name || b.buyer_username || '',
+      site_name: '치트키가구매',
+      product_name: b.product_name,
+      is_rocket: b.shipping_type === '로켓',
+      amount: Number(b.price || 0),
+      quantity: b.quantity || 1,
+      deposit_memo: [b.buyer_bank, (b.buyer_account || '').replace(/\D/g, ''), b.buyer_depositor].filter(Boolean).join(' '),
+      memo: b.option_text || '',
+    });
+    setPushed(p => new Set(p).add(idx));
+  };
+  const pushAll = async () => {
+    if (!buyers) return;
+    setBuyersBusy(true); setMsg('가구매 처리중으로 넘기는 중...');
+    try {
+      let n = 0;
+      for (let i = 0; i < buyers.length; i++) { if (!pushed.has(i)) { await pushOne(buyers[i], i); n++; } }
+      setMsg(`↪ ${n}건 가구매 처리중으로 넘김`);
+      onPushed?.();
     } catch (e: any) { setMsg(`❌ ${String(e?.message || e).slice(0, 80)}`); }
     finally { setBuyersBusy(false); }
   };
@@ -267,7 +296,7 @@ function GagumaePanel() {
         {status?.ok && <span className="text-[11px] text-gray-400">{status.user} · 방 {status.rooms}개</span>}
         <div className="ml-auto flex items-center gap-2">
           <button onClick={check} className="text-xs px-2 py-1 rounded border">새로고침</button>
-          {(room || status?.my_register) && <button onClick={() => loadBuyers(false)} disabled={buyersBusy} className="text-xs px-2 py-1 rounded border text-indigo-600 disabled:opacity-50">👥 구매자</button>}
+          {(room || status?.my_register) && <button onClick={() => loadBuyers(false)} disabled={buyersBusy} className="text-xs px-2 py-1 rounded bg-indigo-600 text-white font-semibold disabled:opacity-50">📥 가져오기</button>}
           {room && <button onClick={enter} className="text-xs px-2 py-1 rounded bg-[#7c3aed] text-white font-semibold">입장</button>}
           {status?.base && (status.latest_room || room) && (
             <a href={`${status.base}/dashboard/crossbuy/room.php?id=${(room || status.latest_room)!.id}`} target="_blank" rel="noreferrer"
@@ -304,19 +333,38 @@ function GagumaePanel() {
           <button onClick={save} className="px-3 py-1.5 rounded bg-[#7c3aed] text-white font-semibold">저장</button>
         </div>
       )}
-      {/* 나의 구매자 리스트 (배송타입 + 계좌번호) */}
+      {/* 가구매방에서 가져온 정보: 나의 상품정보 + 가구매자 리스트 */}
       {buyers && (
         <div className="mt-2 pt-2 border-t">
+          {/* 나의 상품정보 (상품별 구매자 수) */}
+          <div className="mb-2">
+            <div className="text-sm font-bold mb-1">📦 나의 상품정보</div>
+            {Array.from(new Map(buyers.map(b => [b.product_name, b])).values()).map((p, i) => {
+              const cnt = buyers.filter(x => x.product_name === p.product_name).length;
+              return (
+                <div key={i} className="flex items-center gap-2 text-[12px] py-0.5">
+                  <span className={`px-1.5 py-0.5 rounded-full text-[10px] font-bold ${p.shipping_type === '로켓' ? 'bg-blue-100 text-blue-700' : 'bg-orange-100 text-orange-700'}`}>
+                    {p.shipping_type === '로켓' ? '🚀 로켓' : '📦 일반배송'}
+                  </span>
+                  <span className="truncate max-w-[420px]" title={p.product_name}>{p.product_name}</span>
+                  <span className="text-gray-400">· 가구매자 {cnt}명</span>
+                </div>
+              );
+            })}
+          </div>
+          {/* 가구매자 리스트 */}
           <div className="flex items-center gap-2 mb-1">
-            <span className="font-semibold text-sm">나의 구매자 리스트</span>
+            <span className="font-semibold text-sm">가구매자 리스트</span>
             <span className="text-[11px] text-gray-400">{buyers.length}명</span>
+            <button onClick={pushAll} disabled={buyersBusy || !buyers.length || pushed.size >= buyers.length}
+              className="ml-auto text-xs px-2 py-1 rounded bg-[#7c3aed] text-white font-semibold disabled:opacity-50">↪ 전체 가구매 처리중으로</button>
             <button onClick={() => exportBuyersExcel(buyers, status?.open_room?.date)} disabled={!buyers.length}
-              className="ml-auto text-xs px-2 py-1 rounded bg-green-700 text-white font-semibold disabled:opacity-50">📥 엑셀</button>
+              className="text-xs px-2 py-1 rounded bg-green-700 text-white font-semibold disabled:opacity-50">📥 엑셀</button>
             <button onClick={() => loadBuyers(true)} disabled={buyersBusy || !buyers.length}
               className="text-xs px-2 py-1 rounded bg-emerald-600 text-white font-semibold disabled:opacity-50">💾 계좌 저장</button>
             <button onClick={() => setBuyers(null)} className="text-xs px-2 py-1 rounded border">닫기</button>
           </div>
-          {!buyers.length ? <div className="text-[12px] text-gray-400 py-2">구매자가 없습니다.</div> : (
+          {!buyers.length ? <div className="text-[12px] text-gray-400 py-2">가구매자가 없습니다.</div> : (
             <div className="overflow-x-auto">
               <table className="w-full text-[12px] border-collapse">
                 <thead>
@@ -328,6 +376,7 @@ function GagumaePanel() {
                     <th className="px-2 py-1 text-right">금액</th>
                     <th className="px-2 py-1 text-left">구매자</th>
                     <th className="px-2 py-1 text-left">계좌 (은행/번호/예금주)</th>
+                    <th className="px-2 py-1 text-center">처리</th>
                   </tr>
                 </thead>
                 <tbody>
@@ -347,6 +396,12 @@ function GagumaePanel() {
                         {b.buyer_account
                           ? <span className="font-mono">{b.buyer_bank} {b.buyer_account}{b.buyer_depositor ? ` (${b.buyer_depositor})` : ''}</span>
                           : <span className="text-gray-300">미지정</span>}
+                      </td>
+                      <td className="px-2 py-1 text-center">
+                        {pushed.has(i)
+                          ? <span className="text-[11px] text-green-600 font-semibold">✓ 넘김</span>
+                          : <button onClick={async () => { await pushOne(b, i); onPushed?.(); }} disabled={buyersBusy}
+                              className="text-[11px] px-2 py-0.5 rounded border text-[#7c3aed] hover:bg-purple-50 disabled:opacity-50">처리중 ↪</button>}
                       </td>
                     </tr>
                   ))}
